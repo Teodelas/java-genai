@@ -22,8 +22,8 @@
  *
  * <p>Then set Project, Location, and USE_VERTEXAI flag as environment variables:
  *
-export GOOGLE_CLOUD_PROJECT=agent-space-460414
-#export GOOGLE_CLOUD_PROJECT=llm-exploration
+export GOOGLE_CLOUD_PROJECT=
+#export GOOGLE_CLOUD_PROJECT=
 export GOOGLE_CLOUD_LOCATION=us-central1
 export GOOGLE_GENAI_USE_VERTEXAI=true
  *
