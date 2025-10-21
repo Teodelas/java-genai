@@ -22,11 +22,10 @@
  *
  * <p>Then set Project, Location, and USE_VERTEXAI flag as environment variables:
  *
- * <p>export GOOGLE_CLOUD_PROJECT=YOUR_PROJECT
- *
- * <p>export GOOGLE_CLOUD_LOCATION=YOUR_LOCATION
- *
- * <p>export GOOGLE_GENAI_USE_VERTEXAI=true
+ export GOOGLE_CLOUD_PROJECT=YOUR_PROJECT
+ export GOOGLE_CLOUD_LOCATION=YOUR_LOCATION
+ export GOOGLE_GENAI_USE_VERTEXAI=true
+ export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
  *
  * <p>1b. If you are using Gemini Developer API, set an API key environment variable. You can find a
  * list of available API keys here: https://aistudio.google.com/app/apikey
@@ -37,8 +36,7 @@
  *
  * <p>mvn clean compile
  *
- * <p>mvn exec:java -Dexec.mainClass="com.google.genai.examples.EditImageMaskReference"
- * -Dexec.args="YOUR_MODEL_ID"
+ * <p>mvn exec:java -Dexec.mainClass="com.google.genai.examples.EditImageMaskReference" -Dexec.args="YOUR_MODEL_ID"
  */
 package com.google.genai.examples;
 

@@ -22,11 +22,10 @@
  *
  * <p>Then set Project, Location, and USE_VERTEXAI flag as environment variables:
  *
- * <p>export GOOGLE_CLOUD_PROJECT=YOUR_PROJECT
- *
- * <p>export GOOGLE_CLOUD_LOCATION=YOUR_LOCATION
- *
- * <p>export GOOGLE_GENAI_USE_VERTEXAI=true
+export GOOGLE_CLOUD_PROJECT=agent-space-460414
+#export GOOGLE_CLOUD_PROJECT=llm-exploration
+export GOOGLE_CLOUD_LOCATION=us-central1
+export GOOGLE_GENAI_USE_VERTEXAI=true
  *
  * <p>1b. If you are using Gemini Developer API, set an API key environment variable. You can find a
  * list of available API keys here: https://aistudio.google.com/app/apikey
@@ -38,14 +37,15 @@
  *
  * <p>mvn clean
  *
- * <p>mvn compile exec:java -Dexec.mainClass="com.google.genai.examples.LiveAudioConversationAsync"
- * -Dexec.args="YOUR_MODEL_ID"
+ * <p>mvn compile exec:java -Dexec.mainClass="com.google.genai.examples.LiveAudioConversationAsync" -Dexec.args="gemini-live-2.5-flash-preview-native-audio-09-2025"
  *
  * <p>3. Speak into the microphone. Press Ctrl+C to exit. Important: This example uses the system
  * default audio input and output, which often won't include echo cancellation. So to prevent the
  * model from interrupting itself it is important that you use headphones.
  */
 package com.google.genai.examples;
+import com.google.genai.types.Content;
+import com.google.genai.types.Part;
 
 import com.google.genai.AsyncSession;
 import com.google.genai.Client;
@@ -53,6 +53,7 @@ import com.google.genai.types.Blob;
 import com.google.genai.types.AutomaticActivityDetection;
 import com.google.genai.types.EndSensitivity;
 import com.google.genai.types.LiveConnectConfig;
+import com.google.genai.types.LiveSendClientContentParameters;
 import com.google.genai.types.LiveSendRealtimeInputParameters;
 import com.google.genai.types.LiveServerMessage;
 import com.google.genai.types.Modality;
@@ -76,6 +77,14 @@ import javax.sound.sampled.LineUnavailableException;
 import javax.sound.sampled.SourceDataLine;
 import javax.sound.sampled.TargetDataLine;
 
+import com.google.genai.types.Content;
+import com.google.genai.types.LiveSendClientContentParameters;
+import com.google.genai.types.Part;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+
+
+
 /** Example of using the live module for a streaming audio conversation. */
 public final class LiveAudioConversationAsync {
 
@@ -94,6 +103,7 @@ public final class LiveAudioConversationAsync {
   private static SourceDataLine speakerLine;
   private static AsyncSession session;
   private static ExecutorService micExecutor = Executors.newSingleThreadExecutor();
+  private static ExecutorService textExecutor = Executors.newSingleThreadExecutor();
 
   /** Creates the parameters for sending an audio chunk. */
   public static LiveSendRealtimeInputParameters createAudioContent(byte[] audioData) {
@@ -170,9 +180,21 @@ public final class LiveAudioConversationAsync {
 
     // --- Live API Config for Audio ---
     // Choice of ["Aoede", "Puck", "Charon", "Kore", "Fenrir", "Leda", "Orus", "Zephyr"]
+    String instructionText = "You are a helpful and energetic German language tutor named Otto. Keep your responses short and encouraging, and only speak in English.";
+    Content systemInstructionContent = 
+      Content.builder()
+        .parts(
+            java.util.List.of(
+                Part.builder()
+                    .text(instructionText) // Direct call to .text() on the Part builder
+                    .build()
+            )
+        )
+        .build();
     String voiceName = "Aoede";
     LiveConnectConfig config =
         LiveConnectConfig.builder()
+            .systemInstruction(systemInstructionContent)
             .responseModalities(Modality.Known.AUDIO)
             .speechConfig(
                 SpeechConfig.builder()
@@ -185,10 +207,10 @@ public final class LiveAudioConversationAsync {
                 RealtimeInputConfig.builder()
                     .automaticActivityDetection(
                         AutomaticActivityDetection.builder()
-                            .startOfSpeechSensitivity(StartSensitivity.Known.START_SENSITIVITY_HIGH)
-                            .endOfSpeechSensitivity(EndSensitivity.Known.END_SENSITIVITY_HIGH)
+                            .startOfSpeechSensitivity(StartSensitivity.Known.START_SENSITIVITY_LOW)
+                            .endOfSpeechSensitivity(EndSensitivity.Known.END_SENSITIVITY_LOW)
                             .prefixPaddingMs(5)
-                            .silenceDurationMs(100)))
+                            .silenceDurationMs(1000)))
             .build();
 
     // --- Shutdown Hook for Cleanup ---
@@ -199,10 +221,15 @@ public final class LiveAudioConversationAsync {
                   System.out.println("\nShutting down...");
                   running = false; // Signal mic thread to stop
                   micExecutor.shutdown();
+                  textExecutor.shutdown();
                   try {
                     if (!micExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
                       System.err.println("Mic executor did not terminate gracefully.");
                       micExecutor.shutdownNow();
+                    }
+                    if (!textExecutor.awaitTermination(5, TimeUnit.SECONDS)) { // <-- ADD THIS BLOCK
+                      System.err.println("Text executor did not terminate gracefully.");
+                      textExecutor.shutdownNow();
                     }
                   } catch (InterruptedException e) {
                     micExecutor.shutdownNow();
@@ -245,14 +272,36 @@ public final class LiveAudioConversationAsync {
       // --- Start Sending Microphone Audio ---
       CompletableFuture<Void> sendFuture =
           CompletableFuture.runAsync(LiveAudioConversationAsync::sendMicrophoneAudio, micExecutor);
+      
+      // --- Start Sending Console Text Input ---
+      CompletableFuture<Void> sendTextFuture =
+          CompletableFuture.runAsync(LiveAudioConversationAsync::sendConsoleInput, textExecutor);
 
+      LiveSendClientContentParameters firstMessageParams =
+          LiveSendClientContentParameters.builder()
+              .turns(Content.fromParts(Part.fromText("you start:")))
+              .turnComplete(true)
+              .build();
+
+      CompletableFuture<Void> firstMessageFuture =
+          session
+              .sendClientContent(firstMessageParams)
+              .whenComplete(
+                  (unused, e) -> {
+                    if (e != null) {
+                      System.err.println(
+                          "❌ Failed to send initial 'your turn:' message: " + e.getMessage());
+                    } else {
+                      System.out.println("📤 Sent initial 'your turn:' message");
+                    }
+                  });
       // Keep the main thread alive. Wait for sending or receiving to finish (or
       // error).
       // In this continuous streaming case, we rely on the shutdown hook triggered by
       // Ctrl+C.
       // We can wait on the futures, but they might not complete normally in this
       // design.
-      CompletableFuture.anyOf(receiveFuture, sendFuture)
+      CompletableFuture.anyOf(receiveFuture, sendFuture, sendTextFuture)
           .handle(
               (res, err) -> {
                 if (err != null) {
@@ -307,6 +356,13 @@ public final class LiveAudioConversationAsync {
 
   /** Callback function to handle incoming audio messages from the server. */
   public static void handleAudioResponse(LiveServerMessage message) {
+    // Check for usage metadata and print it if available
+    message
+        .usageMetadata()
+        .ifPresent(
+            usage -> {
+              System.out.println("Usage Metadata: " + usage);
+            });
     message
         .serverContent()
         .ifPresent(
@@ -343,6 +399,53 @@ public final class LiveAudioConversationAsync {
               }
             });
   }
+
+  private static void sendConsoleInput() {
+  try (BufferedReader reader = new BufferedReader(new InputStreamReader(System.in))) {
+    System.out.println("Text input ready. Type your message and press Enter to send.");
+    String line;
+
+    while (running) {
+      if (reader.ready() && (line = reader.readLine()) != null) {
+        if (line.trim().equalsIgnoreCase("exit")) {
+          running = false;
+          break;
+        }
+
+        // --- This logic is from LiveTextConversationAsync ---
+        LiveSendClientContentParameters textParams =
+            LiveSendClientContentParameters.builder()
+                .turnComplete(true) // Tell the model this is a complete turn
+                .turns(Content.fromParts(Part.fromText(line)))
+                .build();
+        // --------------------------------------------------
+
+        if (session != null) {
+          System.out.println("Sending text: " + line);
+          
+          // --- Use the correct send method from the text example ---
+          session
+              .sendClientContent(textParams)
+              .exceptionally(
+                  e -> {
+                    System.err.println("Error sending text: " + e.getMessage());
+                    return null;
+                  });
+        }
+      } else {
+        // Sleep briefly to prevent high CPU usage
+        Thread.sleep(100);
+      }
+    }
+  } catch (Exception e) {
+    if (running) {
+      System.err.println("Console input error: " + e.getMessage());
+      running = false;
+    }
+  }
+  System.out.println("Text input reading stopped.");
+}
+  
 
   private LiveAudioConversationAsync() {}
 }
