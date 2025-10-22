@@ -59,6 +59,7 @@ com/google/genai/examples/GenerateContentWithImageInput.class
 com/google/genai/examples/ModelManagement.class
 com/google/genai/examples/ComputeTokens.class
 com/google/genai/examples/FileOperationsAsync.class
+com/google/genai/examples/LiveMultiModalConversationAsync.class
 com/google/genai/examples/UpscaleImageAsync.class
 com/google/genai/examples/BatchInlinedRequests.class
 com/google/genai/examples/SegmentImage.class

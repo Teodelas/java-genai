@@ -43,6 +43,7 @@
 /home/teodlh/vscode/java-genai/examples/src/main/java/com/google/genai/examples/GenerateVideosEditOutpaint.java
 /home/teodlh/vscode/java-genai/examples/src/main/java/com/google/genai/examples/HttpOptionsExtraBody.java
 /home/teodlh/vscode/java-genai/examples/src/main/java/com/google/genai/examples/LiveAudioConversationAsync.java
+/home/teodlh/vscode/java-genai/examples/src/main/java/com/google/genai/examples/LiveMultiModalConversationAsync.java
 /home/teodlh/vscode/java-genai/examples/src/main/java/com/google/genai/examples/LiveTextContextWindowCompressionAsync.java
 /home/teodlh/vscode/java-genai/examples/src/main/java/com/google/genai/examples/LiveTextConversationAsync.java
 /home/teodlh/vscode/java-genai/examples/src/main/java/com/google/genai/examples/LiveTextConversationResumptionAsync.java
