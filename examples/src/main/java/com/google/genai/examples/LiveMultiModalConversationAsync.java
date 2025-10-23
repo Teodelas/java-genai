@@ -22,10 +22,11 @@
  *
  * <p>Then set Project, Location, and USE_VERTEXAI flag as environment variables:
  *
-export GOOGLE_CLOUD_PROJECT=agent-space-460414
-#export GOOGLE_CLOUD_PROJECT=
-export GOOGLE_CLOUD_LOCATION=us-central1
-export GOOGLE_GENAI_USE_VERTEXAI=true
+ * <p>export GOOGLE_CLOUD_PROJECT=YOUR_PROJECT
+ *
+ * <p>export GOOGLE_CLOUD_LOCATION=YOUR_LOCATION
+ *
+ * <p>export GOOGLE_GENAI_USE_VERTEXAI=true
  *
  * <p>1b. If you are using Gemini Developer API, set an API key environment variable. You can find a
  * list of available API keys here: https://aistudio.google.com/app/apikey
@@ -76,29 +77,20 @@ import javax.sound.sampled.Line;
 import javax.sound.sampled.LineUnavailableException;
 import javax.sound.sampled.SourceDataLine;
 import javax.sound.sampled.TargetDataLine;
-
-
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.file.Paths;
-
 import java.nio.file.Files;
-
-import com.google.genai.types.ActivityEnd;
-import com.google.genai.types.ActivityStart;
-import java.io.BufferedInputStream;
 import java.io.ByteArrayOutputStream;
-import java.io.IOException;
 import java.io.InputStream;
-import javax.sound.sampled.AudioInputStream;
-import javax.sound.sampled.AudioSystem;
-import javax.sound.sampled.UnsupportedAudioFileException;
 
 
 
 
-/** Example of using the live module for a streaming audio conversation. */
+
+
+/** Example of using the live module for a streaming recorded audio, text, and microphone audio conversation. */
 public final class LiveMultiModalConversationAsync {
 
   // --- Audio Configuration ---
@@ -119,7 +111,7 @@ public final class LiveMultiModalConversationAsync {
   private static ExecutorService textExecutor = Executors.newSingleThreadExecutor();
 
   /** Creates the parameters for sending an audio chunk. */
-  public static LiveSendRealtimeInputParameters createAudioContent(byte[] audioData) {
+public static LiveSendRealtimeInputParameters createAudioContent(byte[] audioData) {
 
     if (audioData == null) {
       System.err.println("Error: Audio is null");
@@ -129,6 +121,28 @@ public final class LiveMultiModalConversationAsync {
     return LiveSendRealtimeInputParameters.builder()
         .media(Blob.builder().mimeType("audio/pcm").data(audioData))
         .build();
+}
+
+ private static byte[] loadAllBytes(String resourcePath) {
+    try (InputStream in = LiveAudioConversationAsync.class.getClassLoader().getResourceAsStream(resourcePath)) {
+          if (in == null) {
+              throw new IOException("Resource not found");
+          }
+
+          ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+          byte[] data = new byte[4096];
+          int bytesRead;
+          while ((bytesRead = in.read(data)) != -1) {
+              buffer.write(data, 0, bytesRead);
+          }
+          byte[] wavBytes = buffer.toByteArray();
+
+          System.out.println("Loaded " + wavBytes.length + " bytes from resource");
+          return wavBytes;
+      } catch (IOException e) {
+        System.err.println("Failed to load starter audio from resources: " + e.getMessage());
+        return null;
+      }
   }
 
   /** Reads audio from the microphone and sends it to the API session. Runs in a separate thread. */
@@ -293,56 +307,32 @@ public final class LiveMultiModalConversationAsync {
       // --- Start Receiving Audio Responses ---
       CompletableFuture<Void> receiveFuture =
           session.receive(LiveMultiModalConversationAsync::handleAudioResponse);
-      System.err.println("Receive stream started.");
+        System.err.println("Receive stream started.");
 
-      // =================================================================
-      // === ADD THIS NEW BLOCK TO SEND THE INITIAL AUDIO FILE ===
-      // =================================================================
-      try {
-        // IMPORTANT: Change this path to your file.
-        // The file must be in your 'src/main/resources' folder.
         String audioFilePath = "you_start.wav";
-        
         System.out.println("Loading initial audio file: " + audioFilePath);
-        byte[] pcm = loadResourceAsPcm16k(audioFilePath);
-
+        byte[] pcm = loadAllBytes(audioFilePath);
         if (pcm == null) {
           throw new RuntimeException("Failed to load initial audio file.");
         }
-
-        // 1. Send ActivityStart
-        LiveSendRealtimeInputParameters start =
-            LiveSendRealtimeInputParameters.builder()
-                .activityStart(ActivityStart.builder().build())
-                .build();
-
-        // 2. Send Audio Data (using the .media builder from your existing createAudioContent)
-        LiveSendRealtimeInputParameters audio =
-            LiveSendRealtimeInputParameters.builder()
-                .media(Blob.builder().mimeType("audio/pcm").data(pcm).build())
-                .build();
-
-        // 3. Send ActivityEnd
-        LiveSendRealtimeInputParameters end =
-            LiveSendRealtimeInputParameters.builder()
-                .activityEnd(ActivityEnd.builder().build())
-                .build();
-
-        // Send them sequentially, waiting for each to complete
-        System.out.println("Sending initial audio file as first turn...");
-        session.sendRealtimeInput(start).get(); // .get() blocks until the message is sent
-        session.sendRealtimeInput(audio).get();
-        session.sendRealtimeInput(end).get();
-        System.out.println("Initial audio sent. Starting live conversation.");
-
-      } catch (Exception e) {
-        System.err.println("Could not send initial audio file: " + e.getMessage());
-        e.printStackTrace();
-        System.exit(1); // Exit if the initial file fails
-      }
-      // =================================================================
-      // === END OF NEW BLOCK ===
-      // =================================================================
+        LiveSendClientContentParameters firstMessageParams =
+          LiveSendClientContentParameters.builder()
+              .turns(Content.fromParts(Part.fromBytes(pcm, "audio/wav")))
+              .turnComplete(true)
+              .build();
+        
+        CompletableFuture<Void> firstMessageFuture =
+          session
+              .sendClientContent(firstMessageParams)
+              .whenComplete(
+                  (unused, e) -> {
+                    if (e != null) {
+                      System.err.println(
+                          "❌ Failed to send initial 'your turn:' message: " + e.getMessage());
+                    } else {
+                      System.out.println("📤 Sent initial 'your turn:' message");
+                    }
+                  });
 
       // --- Start Sending Microphone Audio ---
       CompletableFuture<Void> sendFuture =
@@ -522,61 +512,5 @@ public final class LiveMultiModalConversationAsync {
   System.out.println("Text input reading stopped.");
 }
   
-
-  private static byte[] loadResourceAsPcm16k(String resourcePath) {
-    try {
-      // Find the file in the resources folder
-      InputStream stream =
-          LiveAudioConversationAsync.class.getClassLoader().getResourceAsStream(resourcePath);
-      if (stream == null) {
-        System.err.println("Error: Audio resource not found: " + resourcePath);
-        return null;
-      }
-
-      try (BufferedInputStream input = new BufferedInputStream(stream);
-          AudioInputStream source = AudioSystem.getAudioInputStream(input)) {
-
-        AudioFormat base = source.getFormat();
-        // Target format: 16kHz, 16-bit, mono, signed, little-endian
-        AudioFormat target =
-            new AudioFormat(AudioFormat.Encoding.PCM_SIGNED, 16000f, 16, 1, 2, 16000f, false);
-
-        AudioInputStream toRead;
-        if (AudioSystem.isConversionSupported(target, base)) {
-          toRead = AudioSystem.getAudioInputStream(target, source);
-        } else {
-          // Fallback check
-          if (base.getEncoding() == AudioFormat.Encoding.PCM_SIGNED
-              && base.getSampleRate() == 16000f
-              && base.getSampleSizeInBits() == 16
-              && base.getChannels() == 1
-              && !base.isBigEndian()) {
-            toRead = source;
-          } else {
-            System.err.println(
-                "Warning: Audio conversion to PCM 16k not supported for "
-                    + resourcePath
-                    + "; using original format bytes");
-            toRead = source;
-          }
-        }
-
-        try (AudioInputStream ais = toRead;
-            ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
-
-          byte[] buffer = new byte[4096];
-          int read;
-          while ((read = ais.read(buffer)) != -1) {
-            baos.write(buffer, 0, read);
-          }
-          return baos.toByteArray();
-        }
-      }
-    } catch (UnsupportedAudioFileException | IOException e) {
-      System.err.println("Failed to load starter audio from resources: " + e.getMessage());
-      return null;
-    }
-  }
-
   private LiveMultiModalConversationAsync() {}
 }
